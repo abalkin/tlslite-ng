@@ -231,6 +231,7 @@ class HandshakeSettings(object):
         self.ticketKeys = []
         self.ticketCipher = "aes256gcm"
         self.ticketLifetime = 24 * 60 * 60
+        self.ticket_count = 2
 
     def __init__(self):
         """Initialise default values for settings."""
@@ -435,6 +436,10 @@ class HandshakeSettings(object):
             raise ValueError("Ticket lifetime must be a positive integer "
                              "smaller or equal 604800 (7 days)")
 
+        if not 0 < other.ticket_count < 2**16:
+            raise ValueError("Incorrect amount for number of new session "
+                             "tickets to send")
+
     def _copy_cipher_settings(self, other):
         """Copy values related to cipher selection."""
         other.cipherNames = self.cipherNames
@@ -457,6 +462,7 @@ class HandshakeSettings(object):
         other.ticketKeys = self.ticketKeys
         other.ticketCipher = self.ticketCipher
         other.ticketLifetime = self.ticketLifetime
+        other.ticket_count = self.ticket_count
 
     @staticmethod
     def _remove_all_matches(values, needle):

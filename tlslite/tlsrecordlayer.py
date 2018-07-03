@@ -163,6 +163,9 @@ class TLSRecordLayer(object):
         # NewSessionTickets received from server
         self.tickets = []
 
+        self._buffer_content_type = None
+        self._buffer = bytearray()
+
     @property
     def _client(self):
         """Boolean stating if the endpoint acts as a client"""
@@ -581,7 +584,7 @@ class TLSRecordLayer(object):
         raise TLSLocalAlert(alert, errorStr)
 
     def _sendMsgs(self, msgs):
-        # send messages together
+        # send messages together in a single TCP write
         self.sock.buffer_writes = True
         randomizeFirstBlock = True
         for msg in msgs:
@@ -591,7 +594,7 @@ class TLSRecordLayer(object):
         self.sock.flush()
         self.sock.buffer_writes = False
 
-    def _sendMsg(self, msg, randomizeFirstBlock = True):
+    def _sendMsg(self, msg, randomizeFirstBlock=True, update_hashes=True):
         """Fragment and send message through socket"""
         #Whenever we're connected and asked to send an app data message,
         #we first send the first byte of the message.  This prevents
@@ -609,7 +612,7 @@ class TLSRecordLayer(object):
         buf = msg.write()
         contentType = msg.contentType
         #Update handshake hashes
-        if contentType == ContentType.handshake:
+        if update_hashes and contentType == ContentType.handshake:
             self._handshake_hash.update(buf)
 
         #Fragment big messages
@@ -624,6 +627,27 @@ class TLSRecordLayer(object):
         msgFragment = Message(contentType, buf)
         for result in self._sendMsgThroughSocket(msgFragment):
             yield result
+
+    def _queue_message(self, msg):
+        """Just queue message for sending, for record layer coalescing."""
+        if self._buffer_content_type is not None and \
+                self._buffer_content_type != msg.contentType:
+            raise ValueError("Queuing of wrong message types")
+        if self._buffer_content_type is None:
+            self._buffer_content_type = msg.contentType
+
+        serialised_msg = msg.write()
+        self._buffer += serialised_msg
+        if msg.contentType == ContentType.handshake:
+            self._handshake_hash.update(serialised_msg)
+
+    def _queue_flush(self):
+        """Send the queued messages."""
+        msg = Message(self._buffer_content_type, self._buffer)
+        for result in self._sendMsg(msg, update_hashes=False):
+            yield result
+        self._buffer_content_type = None
+        self._buffer = bytearray()
 
     def _sendMsgThroughSocket(self, msg):
         """Send message, handle errors"""
